@@ -1,5 +1,6 @@
 **表字段说明**
-
+DBA_TABLES介绍了数据库中的所有关系表。其列与 中的列相同。ALL_TABLES
+若要收集此视图的统计信息，请使用该包DBMS_STAT
 | 字段名 | 说明 |
 | ------------- | ------------- |
 | OWNER  | 表属于哪个用户 |
@@ -15,17 +16,17 @@
 | INITIAL_EXTENT | 以字节为单位的初始区段大小  |
 | NEXT_EXTENT | 下一个extent分配大小，分区表为空  |
 | MIN_EXTENTS |  段中分配的区中的最小值，分区表为空  |
-MAX_EXTENTS | 段中分配的区中的最大值，分区表为空  |
+|MAX_EXTENTS | 段中分配的区中的最大值，分区表为空  |
 | PCT_INCREASE  |   在extents中，增长的比例，分区表为空  |
 | FREELISTS  |   分配到段中自由列表的数量，分区表为空  |
 | FREELIST_GROUPS | 分配到段中的自由列表组数量，分区表为空    |
 | LOGGING | 是否记录日志，分区表为空   |
 |BACKED_UP |   在上一次修改过后是否备份     |
 | NUM_ROWS  | 表示表的行数  |
-| BLOCKS  |  表中没有使用过的块  |
-| EMPTY_BLOCKS | 以字节为单位的初始区段大小  |
+| BLOCKS  |  使用过的块的数量  |
+| EMPTY_BLOCKS | 表中没有使用过的块  |
 | AVG_SPACE | 可用的平均空间大小    |
-| CHAIN_CNT  | 表中跨越多个块的行数量  |
+| CHAIN_CNT  | 表中跨越多个块的行数量（行链接与行迁移的数量）  |
 | AVG_ROW_LEN  | 平均行长度，包括行开销  |
 | AVG_SPACE_FREELIST_BLOCKS | 在freelist上所有块的平均可用空间  |
 | NUM_FREELIST_BLOCKS | 每个实例有多少线程可以同时扫描表   |
@@ -45,7 +46,7 @@ MAX_EXTENTS | 段中分配的区中的最大值，分区表为空  |
 | CELL_FLASH_CACHE | 以字节为单位的扩展区段的大小  |
 | ROW_MOVEMENT | 是否启用或禁用行移动  |
 |  GLOBAL_STATS |  是否在不合并基础分区的情况下计算统计信息  |
-| USER_STATS | 统计数据是否由用户直接输入  |
+| USER_STATS | 表明表的统计信息是由用户指定还是对表分析得出的  |
 | DURATION |  临时表的持续时间  |
 | SKIP_CORRUPT | 是否启用或禁用跳过损坏块  |
 | MONITORING | 是否应该跟踪修改量  |
@@ -66,4 +67,5 @@ MAX_EXTENTS | 段中分配的区中的最大值，分区表为空  |
 - oracle 3中不同表 https://www.cnblogs.com/51linux/p/6274457.html https://blog.csdn.net/luke_wang/article/details/78544480
 - 行迁移与行链接 https://blog.csdn.net/tomato__/article/details/40146573
 - 嵌套表 （在一个表 解决一对多） https://www.cnblogs.com/oldcat/archive/2011/09/17/2179928.html
-.- 块，区，段，表空间 https://www.cnblogs.com/polestar/p/4225675.html
+- 块，区，段，表空间 https://www.cnblogs.com/polestar/p/4225675.html
+- free list是一种单向链表用于定位可以接收数据的块，在字典管理方式的表空间中，Oracle使用free list来管理未分配的存储块。Oracle记录了有空闲空间的块用于insert或Update。空闲空间来源于两种方式:1.段中所有超过HWM的 块，这些块已经分配给段了，但是还未被使用。2.段中所有在HWM下的且链入了free list的块，可以被重用
