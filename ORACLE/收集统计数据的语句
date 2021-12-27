@@ -1,0 +1,180 @@
+深入理解Oracle Statistic统计信息
+https://www.cnblogs.com/ayumie/p/10910516.html
+
+1.统计信息简介
+
+统计信息主要是描述数据库中表，索引的大小，规模，数据分布状况等的一类信息。比如，表的行数，块数，平均每行的大小，索引的leaf blocks，索引字段的行数，不同值的大小等，都属于统计信息。cbo正是根据这些统计信息数据，计算出不同访问路径下，不同join 方式下，各种计划的成本，最后选择出成本最小的计划。
+
+在cbo(基于代价的优化器模式)条件下，sql语句的执行计划由统计信息来决定，若没有统计信息则会采取动态采样的方式决定执行计划！可以说统计信息关乎sql的执行计划是否正确，属于sql执行的指导思想，oracle的初始化参数statistics_level控制收集统计信息的级别，有三个参数值:
+basic :收集基本的统计信息
+typical：收集大部分统计信息(数据库的默认设置)
+all：收集全部统计信息
+
+oracle 10g之后，query optimizer就已经将cbo作为默认优化器，并且oracle官方不再支持rbo服务。但是，通过优化器参数optimizer_mode，我们可以控制oracle优化器生成不同模式下的执行计划。
+
+关于优化器的请参考：《 sql性能优化之optimizer_mode参数原理渗透解析 》
+
+2.如何收集统计信息
+2.1 统计信息的内容：
+
+1）table statistics，表统计信息
+number of rows --行数量
+number of blocks --block数量
+average row length --平均行的长度.
+
+2）column statistics，列统计信息
+number of distinct values (ndv) in column --列中distinct的值
+number of nulls in column --列中null的值
+data distribution (histogram)  --数据分布
+
+3）index statistics，索引统计信息
+number of leaf blocks --子节点的块数量
+levels --子节点数量
+clustering factor --集群因子
+
+4）system statistics，系统统计信息
+i/o performance and utilization --io性能和利用率
+cpu performance and utilization --cpu的性能和利用率
+
+2.2 收集统计信息
+oracle statistic 的收集，可以使用analyze 命令，也可以使用dbms_stats 包来收集，oracle 建议使用dbms_stats包来收集统计信息，因为dbms_stats包收集的更广，并且更准确。analyze 在以后的版本中可能会被移除。
+
+dbms_stats常用的几个过程如下：
+dbms_stats.gather_table_stats 收集表、列和索引的统计信息；
+dbms_stats.gather_schema_stats 收集schema下所有对象的统计信息；
+dbms_stats.gather_index_stats 收集索引的统计信息；
+dbms_stats.gather_system_stats 收集系统统计信息；
+dbms_stats.gather_dictionary_stats：收集所有字典对象的统计；
+dbms_stats.gather_dictionary_stats 收集所有系统模式的统计
+dbms_stats.delete_table_stats 删除表的统计信息
+dbms_stats.delete_index_stats 删除索引的统计信息
+dbms_stats.export_table_stats 输出表的统计信息
+dbms_stats.create_state_table dbms_stats.set_table_stats 设置表的统计 dbms_stats.auto_sample_size
+
+analyze 命令的语法如下：
+sql>analyze table tablename compute statistics ;
+
+sql>analyze table tablename compute statistics for all indexes;
+
+sql>analyze table tablename delete statistics
+
+2.3 统计信息的分类
+oracle 的statistic 信息的收集分两种：自动收集和手工收集。
+oracle 的automatic statistics gathering 是通过scheduler 来实现收集和维护的。job 名称是gather_stats_job, 该job收集数据库所有对象的2种统计信息：
+（1）missing statistics（统计信息缺失）
+（2）stale statistics（统计信息陈旧）
+
+该job 是在数据库创建的时候自动创建，并由scheduler来管理。scheduler 在maintenance windows open时运行gather job。 默认情况下，job 会在每天晚上10到早上6点和周末全天开启。该过程首先检测统计信息缺失和陈旧的对象。然后确定优先级，再开始进行统计信息。
+
+scheduler job的stop_on_window_close 属性控制gather_stats_job 是否继续。该属性默认值为true. 如果该值设置为false，那么gather_stats_job 会中断， 而没有收集完的对象将在下次启动时继续收集。
+
+gather_stats_job 调用dbms_stats.gather_database_stats_job_proc过程来收集statistics 的信息。 该过程收集对象statistics的条件如下：
+（1）对象的统计信息之前没有收集过。
+（2）当对象有超过10%的rows 被修改，此时对象的统计信息也称为stale statistics。
+
+但是对于高度变化的表在白天的活动期间被truncate/drop并重建或者块加载超过本身总大小10%的对象；我们可以将这些表上的统计设置为null
+可以通过以下sql来查看：
+select job_name, program_name, enabled, stop_on_window_close
+from dba_scheduler_jobs
+where job_name = 'gather_stats_job' ;
+
+为了决定是否对对象进行监控，oracle 提供了一个参数statistics_level。通过设置初始化参数statistic_level 为typical 或all，就可以自动收集统计信息(默认值为typical，因此可以随即启用自动收集统计信息的功能)。statistic_level 参数的值可以激活gather_stats_job。
+
+在10g中表监控默认是激活的，如果statistics_level设置为basic，不仅不能监控表，而且将禁掉如下一些10g的新功能：
+（1）ash(active session history)
+（2）assm(automatic shared memory management)
+（3）awr(automatic workload repository)
+（4）addm(automatic database diagnostic monitor)
+
+sys@orcl> show parameter statistics_level;
+
+NAME                                 TYPE        VALUE
+------------------------------------ ----------- ------------------------------
+statistics_level                     string      TYPICAL
+SQL>
+
+当启动对象的监控后，从上次统计信息收集之后的的信息，如inserts，updates，deletes 等，这些改变的信息会记录到user_tab_modifications 视图。
+当对象的数据发生改变之后， 经过几分钟的延时，这些信息写入到user_tab_modifications视图，然后dbms_stats.flush_database_monitoring_info过程就会发现这些信息，并将这些信息保存在内存中，当监控的对象被修改的部分超过10%时，gather_database_stats 或者gather_schema_stats 过程就会去收集这些stale statistics
+
+3.统计信息的存储位置以及常用数据字典
+3.1 统计信息常用数据字典
+统计信息收集如下数据：
+（1）表自身的分析： 包括表中的行数，数据块数，行长等信息。
+（2）列的分析：包括列值的重复数，列上的空值，数据在列上的分布情况。
+（3）索引的分析： 包括索引叶块的数量，索引的深度，索引的聚合因子等。
+
+这些统计信息存放在以下的数据字典里：
+dba_tables
+dba_object_tables
+dba_tab_statistics
+dba_tab_col_statistics
+dba_tab_histograms
+dba_indexes
+dba_ind_statistics
+dba_clusters
+dba_tab_partitions
+dba_tab_subpartitions
+dba_ind_partitions
+dba_ind_subpartitions
+dba_part_col_statistics
+dba_part_histograms
+dba_subpart_col_statistics
+dba_subpart_histograms
+
+3.2 表的统计信息
+包含表行数，使用的块数，空的块数，块的使用率，行迁移和链接的数量，pctfree，pctused的数据，行的平均大小：
+
+select num_rows, --表中的记录数
+blocks, --表中数据所占的数据块数
+empty_blocks, --表中的空块数
+avg_space, --数据块中平均的使用空间
+chain_cnt, --表中行连接和行迁移的数量
+avg_row_len --每条记录的平均长度
+from user_tables;
+
+select num_rows,blocks,empty_blocks,avg_space,chain_cnt,avg_row_len from user_tables;
+
+
+3.3索引列的统计信息
+包含索引的深度（b-tree的级别），索引叶级的块数量，集群因子（clustering_factor), 唯一值的个数。
+
+select blevel, --索引的层数
+leaf_blocks, --叶子结点的个数
+distinct_keys, --唯一值的个数
+avg_leaf_blocks_per_key, --每个key的平均叶块个数
+avg_data_blocks_per_key, --每个key的平均数据块个数
+clustering_factor --群集因子
+from user_indexes;
+
+3.4 列的统计信息
+包含唯一的值个数，列最大小值，密度（选择率），数据分布（直方图信息），null值个数
+
+select num_distinct,  --唯一值的个数
+low_value,  --列上的最小值
+high_value,  --列上的最大值
+density,  --选择率因子（密度）
+num_nulls,  --空值的个数
+num_buckets,  --直方图的bucket个数
+histogram  --直方图的类型
+from user_tab_columns;
+
+
+对于统计信息的搜集，谈谈个人的几点理解：
+1.统计信息默认是存放在数据字典表中的，也只有数据字典中的统计信息，才会影响到cbo。
+2.dbms_stats 提供的create_stat_table 过程，只是生成一个用户自定义的特定格式的表，用来存放统计信息罢了，这个表中的统计信息是不会影响到统计信息的。
+3.gather 系列过程中，如果指定stattab，statid，statown 参数（也可以不指定），则是搜集的统计信息除了更新到数据字典外，还在statown 用户下的stattab 表中存放一份，标示为 statid;
+4.export和import 系列的过程中,stattab,statid,statown 参数不能为空，分别表示把数据字典中的当前统计信息导出到用户自定义的表中，以及把用户表中的统计信息导入到数据字典中，很明显可以看出，这里的导入操作和上面gather 操作会改变统计信息，可能会引起执行执行计划的改变，因此要慎重操作。
+5.每次统计信息搜集前，将旧的统计信息备份起来是很有必要的；特别是保留一份或多份系统在稳定时期的统计信息也是很有必要的。
+6.多长时间搜集一次统计信息，对于统计信息如何备份和保留，搜集统计信息时如何选择合适的采样，并行，直方图设置等都比较重要，需要设计一个较好的统计信息搜集策略。
+
+在ocp 10g考试中会有个跟统计信息相关的考试题：
+1. in your oracle 10g database , you have scheduled a job to update the optimizer statistics at 05:00 pm
+every friday. the job has successfully completed. which three pieces of information would you check to
+confirm that the statistics have been collected? (choose three.)
+
+a. average row size
+b. last analyzed date
+c. size of table in bytes
+d. size of table in database blocks
+e. number of free blocks in the free list
+f. number of extents present in the table
